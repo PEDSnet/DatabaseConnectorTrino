@@ -354,3 +354,127 @@ bulkLoadPostgres <- function(connection, sqlTableName, sqlFieldNames, sqlDataTyp
   delta <- Sys.time() - startTime
   inform(paste("Bulk load to PostgreSQL took", signif(delta, 3), attr(delta, "units")))
 }
+
+
+
+bulkLoadTrino <- function(connection, sqlTableName, sqlFieldNames, data, chunkSize = 1000) {
+  # Ensure that `data` is a data frame
+  print(sqlFieldNames)
+  if (!is.data.frame(data)) {
+    stop("The `data` argument must be a data frame.")
+  }
+  
+inferSqlType <- function(column) {
+    if (is.numeric(column) && all(column %% 1 == 0, na.rm = TRUE)) {
+      "INTEGER"  # Whole numbers
+    } else if (is.numeric(column)) {
+      "DOUBLE"   # Real numbers
+    } else if (is.character(column)) {
+      "VARCHAR"  # Character strings
+    } else if (is.logical(column)) {
+      "BOOLEAN"  # Boolean values
+    } else if (inherits(column, "Date")) {
+      "DATE"     # Date
+    } else if (inherits(column, "POSIXct")) {
+      "TIMESTAMP" # Date-Time
+    } else {
+      stop(sprintf("Unsupported data type for column: %s", class(column)))
+    }
+  }
+
+ getTableSchema <- function(connection, sqlTableName) {
+    query <- sprintf("DESCRIBE %s", sqlTableName)
+    schema <- tryCatch({
+      querySql(connection, query)
+    }, error = function(e) {
+      stop("Failed to retrieve the table schema: ", e$message)
+    })
+    schema
+  }
+  # Check if table exists and retrieve schema
+  tableExists <- TRUE
+  schema <- tryCatch({
+    getTableSchema(connection, sqlTableName)
+  }, error = function(e) {
+    tableExists <- FALSE
+    NULL
+  })
+  
+  print(schema)
+  if (tableExists) {
+    # Validate schema compatibility
+    
+
+    dbFieldNames <- tolower(schema$COLUMN)
+    providedFieldNames <- tolower(sqlFieldNames)
+    dbFieldTypes <- schema$type
+    print(dbFieldNames)
+    print(providedFieldNames)
+    #if (!all(providedFieldNames %in% dbFieldNames)) {
+    #  stop("Provided field names do not match the existing table schema.")
+    #}
+    message("Table ", sqlTableName, " exists and matches provided schema.")
+  } else {
+    # Infer column types from the data frame
+    columnDefinitions <- paste(
+      sprintf("%s %s", sqlFieldNames, sapply(data, inferSqlType)),
+      collapse = ", "
+    )
+    
+    # Create the table
+    createTableSql <- sprintf(
+      "CREATE TABLE %s (%s);",
+      sqlTableName,
+      columnDefinitions
+    )
+    tryCatch({
+      executeSql(connection, createTableSql)
+    }, error = function(e) {
+      stop("Failed to create the table: ", e$message)
+    })
+    message("Table ", sqlTableName, " created successfully.")
+  }
+  
+  # Split the data into chunks to handle large datasets
+  n <- nrow(data)
+  chunks <- split(data, ceiling(seq_len(n) / chunkSize))
+  
+ formatValueForSql <- function(value, sqlType) {
+    if (is.na(value)) {
+      return("NULL")
+    }
+    switch(sqlType,
+           "INTEGER" = as.character(value),
+           "DOUBLE" = as.character(value),
+           "VARCHAR" = sprintf("'%s'", gsub("'", "''", as.character(value))),
+           "BOOLEAN" = ifelse(value, "TRUE", "FALSE"),
+           "DATE" = sprintf("DATE '%s'", as.character(value)),
+           "TIMESTAMP" = sprintf("TIMESTAMP '%s'", as.character(value)),
+           stop("Unsupported SQL type in formatValueForSql")
+    )
+  }
+  
+  # Load data chunk by chunk
+  for (chunkIndex in seq_along(chunks)) {
+    chunk <- chunks[[chunkIndex]]
+    columnTypes <- sapply(chunk, inferSqlType)
+    
+    # Prepare the SQL insert statements for the chunk
+    values <- apply(chunk, 1, function(row) {
+      formattedValues <- mapply(formatValueForSql, row, columnTypes)
+      paste(formattedValues, collapse = ", ")
+    })
+    sqlStatements <- paste0(
+      "INSERT INTO ", sqlTableName, " (", paste(sqlFieldNames, collapse = ", "), ") VALUES (", values, ");"
+    )
+    
+    # Execute the SQL using the provided `executeSql` function
+    tryCatch({
+      executeSql(connection, paste(sqlStatements, collapse = "\n"))
+    }, error = function(e) {
+      stop(sprintf("Failed to insert data chunk %d: %s", chunkIndex, e$message))
+    })
+  }
+  
+  message("Data successfully loaded into ", sqlTableName)
+}

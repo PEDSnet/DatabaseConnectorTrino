@@ -32,7 +32,8 @@ checkIfDbmsIsSupported <- function(dbms) {
     "spark",
     "snowflake",
     "synapse",
-    "duckdb"
+    "duckdb",
+    "trino"
   )
   deprecated <- c(
     "hive",
@@ -332,6 +333,8 @@ connectUsingJdbc <- function(connectionDetails) {
     return(connectSpark(connectionDetails))
   } else if (dbms == "snowflake") {
     return(connectSnowflake(connectionDetails))
+  } else if (dbms == "trino") {
+    return(connectTrino(connectionDetails))
   } else {
     abort("Something went wrong when trying to connect to ", dbms)
   }
@@ -746,6 +749,59 @@ connectSqlite <- function(connectionDetails) {
   )
   return(connection)
 }
+
+#adding trino connection 
+connectTrino <- function(connectionDetails) {
+  inform("Connecting using Trino driver")
+  
+  # Locate the Trino JDBC driver
+  jarPath <- findPathToJar("^trino-jdbc-.*\\.jar$", connectionDetails$pathToDriver)
+  driver <- getJbcDriverSingleton("io.trino.jdbc.TrinoDriver", jarPath)
+  
+  # Construct the connection string
+  if (is.null(connectionDetails$connectionString()) || connectionDetails$connectionString() == "") {
+    if (!grepl("/", connectionDetails$server())) {
+      abort("Error: catalog name not included in server string but is required for Trino. Please specify server as <host>/<catalog>")
+    }
+    parts <- unlist(strsplit(connectionDetails$server(), "/"))
+    host <- parts[1]
+    catalog <- parts[2]
+    if (is.null(connectionDetails$port())) {
+      port <- "8080"  # Default Trino port
+    } else {
+      port <- connectionDetails$port()
+    }
+    connectionString <- paste0("jdbc:trino://", host, ":", port, "/", catalog)
+    if (!is.null(connectionDetails$schema())) {
+      connectionString <- paste0(connectionString, "?schema=", connectionDetails$schema())
+    }
+    if (!is.null(connectionDetails$extraSettings)) {
+      connectionString <- paste(connectionString, connectionDetails$extraSettings, sep = "&")
+    }
+  } else {
+    connectionString <- connectionDetails$connectionString()
+  }
+  
+  # Establish the connection
+  if (is.null(connectionDetails$user())) {
+    connection <- connectUsingJdbcDriver(driver, connectionString, dbms = connectionDetails$dbms)
+  } else {
+    connection <- connectUsingJdbcDriver(driver,
+      connectionString,
+      user = connectionDetails$user(),
+      password = connectionDetails$password(),
+      dbms = connectionDetails$dbms
+    )
+  }
+  
+  # Set attributes for bulk upload and other operations
+  attr(connection, "user") <- connectionDetails$user
+  attr(connection, "password") <- connectionDetails$password
+  attr(connection, "server") <- connectionDetails$server
+  attr(connection, "port") <- connectionDetails$port
+  return(connection)
+}
+
 
 connectUsingJdbcDriver <- function(jdbcDriver,
                                    url,

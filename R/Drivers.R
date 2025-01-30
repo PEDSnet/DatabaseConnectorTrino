@@ -48,6 +48,7 @@ jdbcDrivers <- new.env()
 #' - Spark (Databricks): V2.6.36
 #' - Snowflake: V3.16.01
 #' - BigQuery: v1.3.2.1003
+#' - Trino: v468
 #' 
 #' @return Invisibly returns the destination if the download was successful.
 #' @export
@@ -82,7 +83,7 @@ downloadJdbcDrivers <- function(dbms, pathToDriver = Sys.getenv("DATABASECONNECT
     dir.create(pathToDriver, recursive = TRUE)
   }
   
-  stopifnot(is.character(dbms), length(dbms) == 1, dbms %in% c("all", "postgresql", "redshift", "sql server", "oracle", "pdw", "snowflake", "spark", "bigquery"))
+  stopifnot(is.character(dbms), length(dbms) == 1, dbms %in% c("all", "postgresql", "redshift", "sql server", "oracle", "pdw", "snowflake", "spark", "bigquery","trino"))
   
   if (dbms == "pdw" || dbms == "synapse") {
     dbms <- "sql server"
@@ -96,7 +97,8 @@ downloadJdbcDrivers <- function(dbms, pathToDriver = Sys.getenv("DATABASECONNECT
     4,oracle,oracleV19.8.zip,https://ohdsi.github.io/DatabaseConnectorJars/
     5,spark,DatabricksJDBC42-2.6.36.1062.zip,https://databricks-bi-artifacts.s3.us-east-2.amazonaws.com/simbaspark-drivers/jdbc/2.6.36/
     6,snowflake,snowflake-jdbc-3.16.1.jar,https://repo1.maven.org/maven2/net/snowflake/snowflake-jdbc/3.16.1/
-    7,bigquery,SimbaJDBCDriverforGoogleBigQuery42_1.6.2.1003.zip,https://storage.googleapis.com/simba-bq-release/jdbc/"
+    7,bigquery,SimbaJDBCDriverforGoogleBigQuery42_1.6.2.1003.zip,https://storage.googleapis.com/simba-bq-release/jdbc/
+    8,trino,trino-jdbc-468.jar,https://repo1.maven.org/maven2/io/trino/trino-jdbc/468/"
   )
 
   if (dbms == "all") {
